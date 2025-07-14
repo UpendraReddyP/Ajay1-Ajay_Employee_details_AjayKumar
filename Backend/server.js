@@ -13,7 +13,7 @@ const app = express();
 // CORS middleware
 app.use(cors({
   origin: [
-    'http://13.60.200.89:8156', // Login Server
+    'http://13.60.200.89:8036', // Login Server
     'http://13.60.200.89:3093', // Employee Server
     'http://13.60.200.89:5500', // Live Server (Default)
     'http://127.0.0.1:5500', // Live Server (IP)
