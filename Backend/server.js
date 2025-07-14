@@ -10,15 +10,26 @@ dotenv.config();
 
 const app = express();
 
-// CORS middleware
+// CORS setup (fixed to handle preflight and multiple origins)
+const allowedOrigins = [
+  'http://13.60.200.89:8036',
+  'http://13.60.200.89:8156', // ✅ Frontend
+  'http://13.60.200.89:3093',
+  'http://13.60.200.89:5500',
+  'http://127.0.0.1:5500'
+];
+
 app.use(cors({
-  origin: [
-    'http://13.60.200.89:8036', // Login Server
-    'http://13.60.200.89:3093', // Employee Server
-    'http://13.60.200.89:5500', // Live Server (Default)
-    'http://127.0.0.1:5500', // Live Server (IP)
-   // 'http://13.60.200.89:8037'  // Live Server (Alternate)
-  ]
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: 'GET,POST,PUT,DELETE,OPTIONS',
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
 
 app.use(express.json());
@@ -26,24 +37,22 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Multer configuration
+// Multer file upload setup
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir);
 }
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
+  destination: (req, file, cb) => cb(null, 'uploads/'),
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     cb(null, uniqueSuffix + '-' + file.originalname);
   }
 });
 
 const upload = multer({
-  storage: storage,
+  storage,
   fileFilter: (req, file, cb) => {
     const validTypes = ['image/jpeg', 'image/png'];
     if (!validTypes.includes(file.mimetype)) {
@@ -63,7 +72,7 @@ const pool = new Pool({
   port: process.env.DB_PORT || 5432,
 });
 
-// Initialize database
+// Create employees table and profile_image column if not exists
 async function initializeDatabase() {
   try {
     const tableCheck = await pool.query(`
@@ -74,43 +83,36 @@ async function initializeDatabase() {
       );
     `);
 
-    const tableExists = tableCheck.rows[0].exists;
-
-    if (!tableExists) {
-      console.log('Creating employees table...');
+    if (!tableCheck.rows[0].exists) {
       await pool.query(`
         CREATE TABLE employees (
           id VARCHAR(7) PRIMARY KEY,
-          name VARCHAR(50) NOT NULL,
-          role VARCHAR(40) NOT NULL,
-          gender VARCHAR(10) NOT NULL,
-          dob DATE NOT NULL,
-          location VARCHAR(40) NOT NULL,
-          email VARCHAR(50) NOT NULL,
-          phone VARCHAR(10) NOT NULL,
-          join_date DATE NOT NULL,
-          experience INTEGER NOT NULL,
-          skills TEXT NOT NULL,
-          achievement TEXT NOT NULL,
+          name VARCHAR(50),
+          role VARCHAR(40),
+          gender VARCHAR(10),
+          dob DATE,
+          location VARCHAR(40),
+          email VARCHAR(50),
+          phone VARCHAR(10),
+          join_date DATE,
+          experience INTEGER,
+          skills TEXT,
+          achievement TEXT,
           profile_image VARCHAR(255)
         );
       `);
-      console.log('Employees table created successfully.');
+      console.log('Employees table created.');
     } else {
-      // Check if profile_image column exists
       const columnCheck = await pool.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.columns 
-          WHERE table_schema = 'public' 
-          AND table_name = 'employees' 
+          WHERE table_name = 'employees' 
           AND column_name = 'profile_image'
         );
       `);
-
       if (!columnCheck.rows[0].exists) {
-        console.log('Adding profile_image column to employees table...');
         await pool.query('ALTER TABLE employees ADD COLUMN profile_image VARCHAR(255);');
-        console.log('profile_image column added successfully.');
+        console.log('Added profile_image column.');
       }
     }
   } catch (err) {
@@ -119,35 +121,33 @@ async function initializeDatabase() {
   }
 }
 
-// Database connection test
+// Test connection and initialize DB
 pool.connect((err, client, release) => {
   if (err) {
     console.error('Database connection error:', err);
     process.exit(1);
   } else {
-    console.log('Connected to PostgreSQL database');
+    console.log('Connected to PostgreSQL');
     release();
     initializeDatabase();
   }
 });
 
-// Health check
+// Routes
+
 app.get('/api/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
     res.status(200).json({ status: 'Database connection OK' });
   } catch (err) {
-    console.error('Health check error:', err);
     res.status(500).json({ error: 'Database connection failed', details: err.message });
   }
 });
 
-// Serve employee management page
 app.get('/employees', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'employees.html'));
 });
 
-// Track new users
 let lastChecked = new Date();
 app.get('/api/new-users', async (req, res) => {
   try {
@@ -158,33 +158,30 @@ app.get('/api/new-users', async (req, res) => {
     lastChecked = new Date();
     res.json(result.rows);
   } catch (err) {
-    console.error('Error in GET /api/new-users:', err);
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
-// Get all users
 app.get('/api/all-users', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT username, email, profile_image FROM users ORDER BY id DESC'
-    );
+    const result = await pool.query('SELECT username, email, profile_image FROM users ORDER BY id DESC');
     res.json(result.rows);
   } catch (err) {
-    console.error('Error in GET /api/all-users:', err);
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
-// Add or update employee
 app.post('/api/add-employee', upload.single('profileImage'), async (req, res) => {
   try {
     const {
-      id, name, role, gender, dob, location, email, phone, joinDate, experience, skills, achievement
+      id, name, role, gender, dob, location, email, phone,
+      joinDate, experience, skills, achievement
     } = req.body;
+
     const profileImage = req.file ? `uploads/${req.file.filename}` : null;
 
-    if (!id || !name || !role || !gender || !dob || !location || !email || !phone || !joinDate || !experience || !skills || !achievement) {
+    if (!id || !name || !role || !gender || !dob || !location || !email ||
+        !phone || !joinDate || !experience || !skills || !achievement) {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
@@ -202,28 +199,25 @@ app.post('/api/add-employee', upload.single('profileImage'), async (req, res) =>
 
     const existing = await pool.query('SELECT id FROM employees WHERE id = $1', [id]);
     if (existing.rows.length > 0) {
-      await pool.query(
-        `UPDATE employees SET 
-          name = $1, role = $2, gender = $3, dob = $4, location = $5, email = $6, 
-          phone = $7, join_date = $8, experience = $9, skills = $10, achievement = $11, 
-          profile_image = $12 
-        WHERE id = $13`,
-        [name, role, gender, dob, location, email, phone, joinDate, experience, skills, achievement, profileImage, id]
-      );
+      await pool.query(`
+        UPDATE employees SET 
+          name = $1, role = $2, gender = $3, dob = $4, location = $5, email = $6,
+          phone = $7, join_date = $8, experience = $9, skills = $10,
+          achievement = $11, profile_image = $12
+        WHERE id = $13
+      `, [name, role, gender, dob, location, email, phone, joinDate, experience, skills, achievement, profileImage, id]);
+
       res.status(200).json({ message: 'Employee updated successfully', profile_image: profileImage });
     } else {
-      await pool.query(
-        `INSERT INTO employees (id, name, role, gender, dob, location, email, phone, join_date, experience, skills, achievement, profile_image) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [id, name, role, gender, dob, location, email, phone, joinDate, experience, skills, achievement, profileImage]
-      );
+      await pool.query(`
+        INSERT INTO employees (id, name, role, gender, dob, location, email, phone, join_date, experience, skills, achievement, profile_image)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `, [id, name, role, gender, dob, location, email, phone, joinDate, experience, skills, achievement, profileImage]);
+
       res.status(201).json({ message: 'Employee added successfully', profile_image: profileImage });
     }
   } catch (err) {
-    console.error('Error in POST /api/add-employee:', err);
-    if (err.code === '23505') {
-      res.status(400).json({ error: 'Employee ID already exists' });
-    } else if (err.message.includes('Only JPEG or PNG')) {
+    if (err.message.includes('Only JPEG or PNG')) {
       res.status(400).json({ error: err.message });
     } else {
       res.status(500).json({ error: 'Server error', details: err.message });
@@ -231,18 +225,15 @@ app.post('/api/add-employee', upload.single('profileImage'), async (req, res) =>
   }
 });
 
-// Get all employees
 app.get('/api/employees', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM employees');
     res.json(result.rows);
   } catch (err) {
-    console.error('Error in GET /api/employees:', err);
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
-// Delete employee
 app.delete('/api/delete-employee/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -252,14 +243,14 @@ app.delete('/api/delete-employee/:id', async (req, res) => {
     }
     res.json({ message: 'Employee deleted successfully' });
   } catch (err) {
-    console.error('Error in DELETE /api/delete-employee:', err);
     res.status(500).json({ error: 'Server error', details: err.message });
   }
 });
 
-// Default route for favicon to suppress 404
+// Suppress favicon 404
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
+// Start the server
 const PORT = process.env.EMPLOYEE_PORT || 3093;
 app.listen(PORT, () => {
   console.log(`Employee server running on port ${PORT}`);
