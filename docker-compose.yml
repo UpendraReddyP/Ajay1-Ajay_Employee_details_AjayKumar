@@ -5,7 +5,7 @@ services:
     image: postgres:13
     container_name: postgres_db01
     ports:
-      - "5412:5432"
+      - "5093:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: admin123
@@ -25,7 +25,7 @@ services:
     build: ./Backend
     container_name: employee_backend00
     ports:
-      - "3412:3412"
+      - "3093:3093"
     env_file:
       - ./Backend/server.env
     depends_on:
@@ -41,7 +41,7 @@ services:
     build: ./Frontend
     container_name: employee_frontend00
     ports:
-      - "8036:80"
+      - "8156:80"
     volumes:
       - ./Frontend:/usr/share/nginx/html:ro
     depends_on:
