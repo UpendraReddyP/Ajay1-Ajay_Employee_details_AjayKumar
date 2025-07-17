@@ -12,10 +12,10 @@ const app = express();
 
 // CORS setup (fixed to handle preflight and multiple origins)
 const allowedOrigins = [
-  'http://13.60.200.89:8036',
-  'http://13.60.200.89:8156', // ✅ Frontend
-  'http://13.60.200.89:3093',
-  'http://13.60.200.89:5500',
+  'http://51.21.195.141:8036',
+  'http://51.21.195.141:8156', // ✅ Frontend
+  'http://51.21.195.141:3093',
+  'http://51.21.195.141:5500',
   'http://127.0.0.1:5500'
 ];
 
